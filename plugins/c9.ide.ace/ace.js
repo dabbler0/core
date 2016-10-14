@@ -1936,6 +1936,13 @@ define(function(require, exports, module) {
                     state: session.bgTokenizer.states[row - 1],
                     mode: session.$mode.$id
                 };
+
+                state.extensionData = {};
+
+                // Any additional state given by ace extensions
+                for (key in dataExtensionHandlers) {
+                    state.extensionData[key] = dataExtensionHandlers[key].getState(session, doc);
+                }
             }
             
             function setState(doc, state) {
@@ -2021,6 +2028,11 @@ define(function(require, exports, module) {
                     
                     ace.on("changeSession", listen);
                     session.on("unload", clean);
+                }
+
+                // Any additional state given by ace extensions
+                for (key in dataExtensionHandlers) {
+                    dataExtensionHandlers[key].setState(state.extensionData[key]);
                 }
             }
             
@@ -2657,6 +2669,24 @@ define(function(require, exports, module) {
              * @param {Number}   [state.jump.select.column]             The column to select to (0 based)
              */
             plugin.freezePublicAPI({
+                /*
+                 * Register a data extension handler, which will add
+                 * extra information to a serialized Ace editor session,
+                 * for plugins that modify the Ace editor.
+                 */
+                addDataExtensionHandler: function(name, getState, setState) {
+                    if (name in dataExtensionHandlers) {
+                        return false;
+                    }
+                    else {
+                        dataExtensionHandlers[name] = {
+                            getState: getState,
+                            setState: setState
+                        }
+                        return true;
+                    }
+                },
+
                 /**
                  * @ignore
                  */
