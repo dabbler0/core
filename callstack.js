@@ -39,6 +39,17 @@ define(function(require, exports, module) {
         var frames = [];
         
         var activeFrame, dbg, menu, button, lastException;
+
+        /* Line marking for Ace-modifying extensions*/
+        var addOverrides = [], removeOverrides = [];
+
+        function overrideAddMark(fn) {
+            addOverrides.push(fn);
+        }
+
+        function overrideClearMarks(fn) {
+            removeOverrides.push(fn);
+        }
         
         var loaded = false;
         function load(){
@@ -350,11 +361,18 @@ define(function(require, exports, module) {
         }
         
         /***** Helper Functions *****/
-        
-        function addMarker(session, type, row) {
-            var marker = session.addMarker(new Range(row, 0, row, 1), "ace_" + type, "fullLine");
-            session.addGutterDecoration(row, type);
-            session["$" + type + "Marker"] = {lineMarker: marker, row: row};
+
+        function addMarker(session, type, row, editor) {
+            var shouldContinue = true;
+            for (var i = 0; i < addOverrides.length; i++) {
+                shouldContinue = shouldContinue && addOverrides[i](session, type, row, editor);
+                if (!shouldContinue) break;
+            }
+            if (shouldContinue) {
+                var marker = session.addMarker(new Range(row, 0, row, 1), "ace_" + type, "fullLine");
+                session.addGutterDecoration(row, type);
+                session["$" + type + "Marker"] = {lineMarker: marker, row: row};
+            }
         }
 
         function removeMarker(session, type) {
@@ -364,10 +382,17 @@ define(function(require, exports, module) {
             session[markerName] = null;
         }
         
-        function removeMarkerFromSession(session) {
-            session.$stackMarker && removeMarker(session, "stack");
-            session.$stepMarker && removeMarker(session, "step");
-            session.$exceptionWidget && session.$exceptionWidget.destroy();
+        function removeMarkerFromSession(session, editor) {
+            var shouldContinue = true;
+            for (var i = 0; i < removeOverrides.length; i++) {
+                shouldContinue = shouldContinue && removeOverrides[i](session, editor);
+                if (!shouldContinue) break;
+            }
+            if (shouldContinue) {
+                session.$stackMarker && removeMarker(session, "stack");
+                session.$stepMarker && removeMarker(session, "step");
+                session.$exceptionWidget && session.$exceptionWidget.destroy();
+            }
         }
         
         function addExceptionWidget(editor, ev) {
@@ -429,7 +454,7 @@ define(function(require, exports, module) {
                     var tab = pane.getTab();
                     if (tab && tab.editor && tab.editor.type == "ace") {
                         var session = tab.document.getSession().session;
-                        removeMarkerFromSession(session);
+                        removeMarkerFromSession(session, tab.editor.ace);
                     }
                 });
                 return;
@@ -442,7 +467,7 @@ define(function(require, exports, module) {
                 return;
                 
             var session = tab.document.getSession().session;
-            removeMarkerFromSession(session);
+            removeMarkerFromSession(session, tab.editor.ace);
 
             if (!frame)
                 return;
@@ -456,7 +481,7 @@ define(function(require, exports, module) {
                     if (row >= session.getLength())
                         row = session.getLength() - 1;
                         
-                    addMarker(session, "step", row);
+                    addMarker(session, "step", row, editor.ace);
                     
                     if (scrollToLine) {
                         var ace = tab.editor.ace;
@@ -470,11 +495,11 @@ define(function(require, exports, module) {
             }
             else {
                 if (path == framePath || path == "/" + framePath)
-                    addMarker(session, "stack", row);
+                    addMarker(session, "stack", row, editor.ace);
 
                 var topFrame = debug.findTopFrame(frames);
                 if (path == topFrame.path)
-                    addMarker(session, "step", topFrame.line);
+                    addMarker(session, "step", topFrame.line, editor.ace);
             }
             
             if (lastException && frameId(frame) == frameId(lastException.frame)) {
@@ -623,6 +648,13 @@ define(function(require, exports, module) {
          * @extends DebugPanel
          **/
         plugin.freezePublicAPI({
+
+            /*
+             * Alter the behavior of of line marking
+             */
+            overrideAddMark: overrideAddMark,
+            overrideClearMarks: overrideClearMarks,
+
             /**
              * When the debugger has hit a breakpoint or an exception, it breaks
              * and shows the active frame in the callstack panel. The active
